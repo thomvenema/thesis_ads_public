@@ -1,0 +1,799 @@
+---
+title: "main_code"
+author: "Thom Venema"
+date: "2022"
+output: pdf_document
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+#General
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lme4)
+library(nlme)
+library(ggplot2)
+library(dplyr)
+library(lmerTest)
+library(afex)
+library(corrplot)
+library(equatiomatic)
+library(vtable)
+ 
+#For the maps
+library(tmap)
+library(raster)
+library(readr)
+library(readxl)
+library(sf)
+#Plotting
+library(stargazer)
+
+options(scipen=20)
+
+```
+
+## R Preparation
+
+
+```{r}
+#Defining years used in project
+years <- c(2000:2018)
+
+#Importing producer prices
+prod_price <- read.csv("~/Documents/Applied data science/thesis_ads/Data/producer_price_world.csv")
+prod_price <- prod_price[prod_price$Year %in% years,]
+countrygroups <- read.csv("~/Documents/Applied data science/thesis_ads/Data/countrygroups.csv")
+
+#Check for all unique areas
+unique(countrygroups$Country.Group)
+#Selection of areas to be used
+used_regions <- c("Central America", "Central Asia", "Eastern Asia", "Eastern Europe", "Northern America",  "Northern Europe", "South America", "Southern Asia", "Southern Europe", "Western Europe", "Oceania", "Eastern Africa","Western Africa", "Southern Africa", "North Africa (excluding Sudan)", "Caribbean")
+
+countrygroups <- countrygroups[countrygroups$Country.Group %in% used_regions, ]
+countrygroups <- countrygroups[seq(1,nrow(countrygroups)-1,2),]
+
+countrygroups$ISO3.Code[countrygroups$Country == "China, mainland"] <- "CHN"
+
+#Adding region to every country
+for (i in 1:nrow(prod_price)){
+  for (j in 1:nrow(countrygroups)){
+    if (prod_price[i,'Area'] == countrygroups[j,'Country']){
+      prod_price[i,'Region'] <- countrygroups[j,'Country.Group']
+    }
+  }
+}
+
+# adding iso3 code, filtering out unused countries
+prod_price <- merge(prod_price, countrygroups[,c("Country", "ISO3.Code")], by.x="Area",by.y="Country")
+```
+
+```{r}
+
+# Merging the data into a single dataset
+
+#There is two seperate datassets for supply, these need to be merged first pre and post 2013
+supply_1 <- read.csv("~/Documents/Applied data science/thesis_ads/Data/domestic_supply_world.csv")
+names(supply_1)[names(supply_1) == 'Area.Code..FAO.'] <- 'Area.Code'
+supply_2 <- read.csv("~/Documents/Applied data science/thesis_ads/Data/domestic_supply_world_2.csv")
+# remove overlap 2010 until 2013
+supply_2 <- supply_2[supply_2$Year < 2010,]
+supply <- rbind(supply_1, supply_2)
+
+
+supply[supply$Year %in% years,]
+supply <- supply[c("Area", "Year","Unit", "Value")]
+names(supply) <- c("Area", "Year","supply_Unit", "supply_Value")
+total_df <- merge(prod_price, supply, by=c("Area", "Year"), all.x = TRUE)
+
+#Components of supply separately. 
+sup_comp_1 <- read.csv("~/Documents/Applied data science/thesis_ads/Data/prod_stock_imp_exp_1969.csv")
+sup_comp_2 <- read.csv("~/Documents/Applied data science/thesis_ads/Data/prod_stock_imp_exp_2010.csv")
+sup_comp_1 <- sup_comp_1[sup_comp_1$Year < 2010,]
+names(sup_comp_2)[names(sup_comp_2) == 'Area.Code..FAO.'] <- 'Area.Code'
+sup_comp <- rbind(sup_comp_1,sup_comp_2)
+
+sup_comp <- sup_comp[sup_comp$Year %in% years,]
+
+production <- sup_comp[sup_comp$Element == "Production",]
+import <- sup_comp[sup_comp$Element == "Import Quantity",]
+export <- sup_comp[sup_comp$Element == "Export Quantity",]
+stock_var <- sup_comp[sup_comp$Element == "Stock Variation",]
+
+production <- production[c("Area", "Year","Unit", "Value")]
+import <- import[c("Area", "Year","Unit", "Value")]
+export <- export[c("Area", "Year","Unit", "Value")]
+stock_var <- stock_var[c("Area", "Year","Unit", "Value")]
+
+names(production) <- c("Area", "Year","production_Unit", "production_Value")
+names(import) <- c("Area", "Year","import_Unit", "import_Value")
+names(export) <- c("Area", "Year","exportn_Unit", "export_Value")
+names(stock_var) <- c("Area", "Year","stock_var_Unit", "stock_var_Value")
+
+total_df <- merge(total_df, production, by=c("Area", "Year"), all.x = TRUE)
+total_df <- merge(total_df, import, by=c("Area", "Year"), all.x = TRUE)
+total_df <- merge(total_df, export, by=c("Area", "Year"), all.x = TRUE)
+total_df <- merge(total_df, stock_var, by=c("Area", "Year"), all.x = TRUE)
+
+urban_population <- read.csv("~/Documents/Applied data science/thesis_ads/Data/urban_pop_world.csv")
+urban_population[urban_population$Year %in% years,]
+urban_population <- urban_population[c("Area", "Year","Unit", "Value")]
+names(urban_population) <- c("Area", "Year","urban_population_Unit", "urban_population_Value")
+total_df <- merge(total_df, urban_population, by=c("Area", "Year"), all.x = TRUE)
+
+rural_population <- read.csv("~/Documents/Applied data science/thesis_ads/Data/rural_pop_world.csv")
+rural_population[rural_population$Year %in% years,]
+rural_population <- rural_population[c("Area", "Year","Unit", "Value")]
+names(rural_population) <- c("Area", "Year","rural_population_Unit", "rural_population_Value")
+total_df <- merge(total_df, rural_population, by=c("Area", "Year"), all.x = TRUE)
+
+gdp <- read.csv("~/Documents/Applied data science/thesis_ads/Data/gdp_world.csv")
+gdp[gdp$Year %in% years,]
+gdp <- gdp[c("Area", "Year","Unit", "Value")]
+names(gdp) <- c("Area", "Year","gdp_Unit", "gdp_Value")
+total_df <- merge(total_df, gdp, by=c("Area", "Year"), all.x = TRUE)
+
+cp <- read.csv("~/Documents/Applied data science/thesis_ads/Data/CP_consprice_world_june.csv")
+cp[cp$Year %in% years,]
+cp <- cp[c("Area", "Year", "Value")]
+names(cp) <- c("Area", "Year", "cp_Value")
+total_df <- merge(total_df, cp, by=c("Area", "Year"), all.x = TRUE)
+
+yield <- read.csv("~/Documents/Applied data science/thesis_ads/Data/yield_world.csv")
+yield[yield$Year %in% years,]
+yield <- yield[c("Area", "Year", "Value")]
+names(yield) <- c("Area", "Year", "yield_Value")
+total_df <- merge(total_df, yield, by=c("Area", "Year"), all.x = TRUE)
+
+
+# CPI adjusted value
+
+total_df$Value_inf_adj <- total_df$Value / (total_df$cp_Value/100)
+
+# Last years wheat price
+# First ordering by year and country to make sure it is lagging the right value
+total_df <- total_df[order(total_df$Year),]
+total_df <- total_df[order(total_df$Area),]
+total_df$Value_lag <- lag(total_df$Value_inf_adj, 1L, na.pad = TRUE)
+# Last years yield
+total_df$Yield_lag <- lag(total_df$yield_Value, 1L, na.pad = TRUE)
+#Deleting the values of the minimum year/the year 2000 as there is no year before that
+total_df <- total_df[total_df$Year != min(total_df$Year),] 
+
+
+# Global oil price in current dollars
+oil <- read.csv("~/Documents/Applied data science/thesis_ads/Data/crude-oil-prices.csv")
+oil[oil$Year %in% years,]
+oil <- oil[c("Year", "Oil...Crude.prices.since.1861..current...")]
+names(oil) <- c("Year","oil_Value")
+total_df <- merge(total_df, oil, by=c("Year"), all.x = TRUE)
+
+# Global wheat price 
+gcpi <- read.csv("~/Documents/Applied data science/thesis_ads/Data/cpi_world.csv")
+worldprice <- read.csv("~/Documents/Applied data science/thesis_ads/Data/wheat_price_1990.csv")
+worldprice$DATE <- as.integer(substr(worldprice$DATE, 1, 4))
+worldprice <- aggregate(worldprice$PWHEAMTUSDM,by=list(worldprice$DATE),FUN=mean, na.rm=TRUE)
+names(worldprice) <- c("Year", "Worldprice")
+worldprice <- worldprice[worldprice$Year > 1999,]
+worldprice$Worldprice <- (worldprice$Worldprice/gcpi$Value)*100
+worldprice[worldprice$Year %in% years,]
+total_df <- merge(total_df, worldprice, by=c("Year"), all.x = TRUE)
+
+#Global CPI as variable
+gcpi[gcpi$Year %in% years,]
+gcpi <- gcpi[c("Year", "Value")]
+names(gcpi) <- c("Year", "gcpi_Value")
+total_df <- merge(total_df, gcpi, by=c("Year"), all.x = TRUE)
+
+
+#Remove row when there is no region present
+total_df <- total_df[is.na(total_df$Region)==FALSE,]
+
+
+
+
+
+```
+
+
+```{r}
+
+#Because of correlation between rural and urban population, amount of urban population will be converted to a percentage
+total_df$population <- total_df$urban_population_Value + total_df$rural_population_Value
+total_df$perc_urban <- total_df$urban_population_Value/total_df$population
+
+#Scaling year; min of timeframe = year 0 for mixed models
+baseyear <- min(total_df$Year)
+df_mixed <- total_df
+df_mixed$Year <- df_mixed$Year - baseyear
+
+```
+
+#Country selection
+
+```{r}
+
+# Three serperate approaches: Top traders global, most common trader and top trader per region
+trade_per_country <- read.csv("~/Documents/Applied data science/thesis_ads/Data/trade_matrix.csv")
+trade_per_country <- trade_per_country[trade_per_country$Reporter.Countries %in% countrygroups$Country,]
+trade_per_country <- trade_per_country[trade_per_country$Element == "Import Quantity",]
+trade_per_country$Value[is.na(trade_per_country$Value)] <- 0
+
+```
+
+```{r}
+
+#1: Top 5 traders in totals
+totals <- data.frame(unique(trade_per_country$Partner.Countries))
+totals$sum <- 0
+for (j in 1:nrow(trade_per_country)){
+  for (i in 1:nrow(totals)){
+  country <- trade_per_country$Partner.Countries[j]
+    if (totals[i,1] == country){
+    totals[i,2] <- totals[i,2] + trade_per_country$Value[j]
+    }
+  }
+  
+}
+names(totals) <- c("Area", "sum")
+totals <- totals[order(-totals$sum),]
+countries_globaltop5 <- totals[1:5,"Area"]
+
+```
+
+```{r}
+
+# 2: most common trader
+#Obtain 10 countries most important for countries 
+# 10 most common main trade partners
+# multiply percentage total supply imported 
+
+#Script to count the number of times a country is one of the top 10 wheat trade partners  
+count_top_suppliers <- 10
+country_count_df <- as.data.frame(countrygroups$Country)
+names(country_count_df) <- "Country"
+country_count_df$count <- 0
+for (i in countrygroups$Country){
+  df <- trade_per_country[trade_per_country$Reporter.Countries == i,]
+  years <- unique(df$Year)
+  for (year in years){
+    year_df <- df[df$Year == year,]
+    year_df <- year_df[order(-year_df$Value),]
+    top_countries <- year_df[1:count_top_suppliers,"Partner.Countries"]
+    for (i in 1:nrow(country_count_df)){
+      if (country_count_df[i,"Country"] %in% top_countries){
+        country_count_df[i,"count"] <- country_count_df[i,"count"] + 1
+        
+      }
+    }
+  }
+}
+
+country_count_df <- country_count_df[order(-country_count_df$count),]
+import_variables_number <- 5
+countries_top_traders <- country_count_df[1:import_variables_number,"Country"]
+
+
+
+```
+
+```{r}
+
+
+#3: Top trader from each region
+totals_region <- merge(totals, countrygroups[,c("Country","Country.Group")], by.x="Area",by.y="Country")
+totals_region <- totals_region[order(-totals_region$sum),]
+
+regional_top <- data.frame(used_regions)
+regional_top$Area <- 0
+for (i in 1:nrow(totals_region)){
+  for (j in 1:nrow(regional_top)){
+    if (totals_region[i,3] == regional_top[j,1] & regional_top[j,2] == 0){
+      regional_top[j,2] <- totals_region[i,1]
+      
+    }
+  }
+  
+}
+
+countries_top_region <- regional_top$Area
+
+
+```
+
+```{r}
+country_variables <- unique(c(countries_globaltop5,countries_top_traders,countries_top_region))
+#To only keep relevant variables
+top_trade_per_country <- trade_per_country[trade_per_country$Partner.Countries %in% country_variables,]
+
+```
+
+
+```{r}
+
+#Adding the import numbers from the countries as columns to the dataframe
+col_names <- list()
+df_merger <- df_mixed[c("Year","Area")]
+for (i in 1:length(country_variables)){
+  df_top <- top_trade_per_country[top_trade_per_country$Partner.Countries == country_variables[i],]
+  df_top <- df_top[df_top$Element == "Import Quantity",]
+  col_name <- paste('Import',country_variables[i], sep="_")
+  col_names <- append(col_names,col_name)
+  df_top <- df_top[c("Reporter.Countries", "Year", "Value")]
+  names(df_top) <- c("Area", "Year", col_name)
+  df_top$Year <- df_top$Year - baseyear
+  df_merger <- merge(df_merger, df_top, by=c("Area", "Year"), all.x = TRUE)
+  
+}
+
+#Assumption: NA are zeroes
+df_merger[is.na(df_merger)] <- 0
+df_import <- merge(df_mixed,df_merger, by=c("Area", "Year"))
+
+#df for normalized import variables
+df_nor <- df_import
+
+import_names <- names(df_nor[,grepl( "Import_" ,names(df_nor))])
+
+#normalization of import, as a percentage of total
+for (i in import_names){
+  df_nor[,i] <-  df_nor[,i] /  (df_nor$import_Value*1000)
+}
+
+names(df_nor)[names(df_nor) == 'Import_United States of America'] <- 'Import_USA'
+names(df_nor)[names(df_nor) == 'Import_Russian Federation'] <- 'Import_Russia'
+names(df_nor)[names(df_nor) == 'Import_United Kingdom of Great Britain and Northern Ireland'] <- 'Import_UK'
+
+# NA check
+df_nor_NA <- df_nor[rowSums(is.na(df_nor)) > 0,] 
+df_nor_NA2 <- df_nor[rowSums(is.na(df_nor)) > 0,] 
+
+# Dropping countries with NA's
+df_nor <- df_nor[df_nor$Area != "Bhutan",]
+df_nor <- df_nor[df_nor$Area != "Burundi",]
+df_nor <- df_nor[df_nor$Area != "Eritrea",]
+df_nor <- df_nor[df_nor$Area != "Serbia and Montenegro",]
+
+```
+
+#Final dataset ensambling
+```{r} 
+# 
+
+# Final model 
+#6 Supply - broken up, other variables as percentages of supply 
+df_sup <- df_nor
+df_sup$Supply2 <- df_sup$production_Value + df_sup$import_Value + df_sup$export_Value + df_sup$stock_var_Value 
+#df_sup$supply_Value_log <- log(df_sup$supply_Value)
+df_sup$supply_Value_log <- log(df_sup$Supply2)
+# df_sup$production_Value <- df_sup$production_Value/df_sup$supply_Value
+# df_sup$import_Value <- df_sup$import_Value/df_sup$supply_Value
+# df_sup$export_Value <- (-df_sup$export_Value)/df_sup$supply_Value
+# df_sup$stock_var_Value <- df_sup$stock_var_Value/df_sup$supply_Value
+df_sup$production_Value <- df_sup$production_Value/df_sup$Supply2
+df_sup$import_Value <- df_sup$import_Value/df_sup$Supply2
+df_sup$export_Value <- (-df_sup$export_Value)/df_sup$Supply2
+df_sup$stock_var_Value <- df_sup$stock_var_Value/df_sup$Supply2
+df_sup$gdp_Value <- log(df_sup$gdp_Value/df_sup$population)
+df_sup$Value_inf_adj <- log(df_sup$Value_inf_adj)
+df_sup$Value_lag <- log(df_sup$Value_lag)
+df_sup$yield_Value <- log(df_sup$yield_Value)
+df_sup$Yield_lag <- log(df_sup$Yield_lag)
+df_sup$population <- log(df_sup$population)
+df_sup$oil_Value <- log(df_sup$oil_Value)
+
+# Correlation check. Un-used variables are also in there
+M2 = cor(select_if(df_sup[,-c(1:11)], is.numeric))
+corrplot(M2, method = 'number')
+```
+# Models
+```{r}
+
+#Model 1: Global top traders
+
+phat1 <- lmer(Value_inf_adj ~ Value_lag + oil_Value +  perc_urban + population + gdp_Value + yield_Value + perc_urban + gdp_Value + Yield_lag + import_Value  + Import_USA + Import_Canada + Import_Germany +  Import_France + Import_Australia + export_Value + stock_var_Value  + gdp_Value + gdp_Value*yield_Value + Year + import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value  + oil_Value*import_Value + oil_Value*export_Value +  (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+df_sup$phat1 <- fitted(phat1)
+
+elasticity_supply_1 <- lmer(supply_Value_log ~ phat1 + Value_lag + oil_Value + yield_Value + Yield_lag  + import_Value  + Import_USA  + Import_Canada + Import_Germany + Import_France + Import_Australia + export_Value + stock_var_Value  + Year  + import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value + oil_Value*import_Value + oil_Value*export_Value + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="Nelder_Mead", optCtrl=list(maxfun=2e5)))
+
+elasticity_demand_1 <- lmer(supply_Value_log ~ phat1 + Value_lag + oil_Value + perc_urban + population + gdp_Value + Year + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+
+
+summary(elasticity_supply_1)
+summary(elasticity_demand_1)
+
+#Model 2: Regional top trader
+
+phat2 <- lmer(Value_inf_adj ~ Value_lag + oil_Value +  perc_urban + population + gdp_Value + yield_Value + perc_urban + gdp_Value + Yield_lag + import_Value  +  Import_Mexico + `Import_China, mainland` + Import_USA + Import_Argentina + Import_Spain + `Import_South Africa` + Import_Australia + Import_Algeria + Import_Kazakhstan + Import_Russia + Import_UK + Import_India + Import_France + export_Value + stock_var_Value  + gdp_Value + gdp_Value*yield_Value + Year + import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value  + oil_Value*import_Value + oil_Value*export_Value +  (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+df_sup$phat2 <- fitted(phat2)
+
+elasticity_supply_2 <- lmer(supply_Value_log ~ phat2 + Value_lag + oil_Value + yield_Value + Yield_lag  +  import_Value  +  Import_Mexico + `Import_China, mainland` + Import_USA + Import_Argentina + Import_Spain + `Import_South Africa` + Import_Australia + Import_Algeria + Import_Kazakhstan + Import_Russia + Import_UK + Import_India + Import_France + export_Value + stock_var_Value  + Year  + import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value + oil_Value*import_Value + oil_Value*export_Value + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+elasticity_demand_2 <- lmer(supply_Value_log ~ phat2 + Value_lag + oil_Value + perc_urban + population + gdp_Value + Year + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+summary(elasticity_supply_2)
+summary(elasticity_demand_2)
+
+
+
+#Model 3: Most common trade partner
+  
+phat3 <- lmer(Value_inf_adj ~ Value_lag + oil_Value +  perc_urban + population + gdp_Value + yield_Value + perc_urban + gdp_Value + Yield_lag + import_Value  + Import_USA + Import_Canada + Import_Argentina +  Import_France + Import_Australia + export_Value + stock_var_Value  + gdp_Value + gdp_Value*yield_Value + Year +  import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value  + oil_Value*import_Value + oil_Value*export_Value +  (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+df_sup$phat3 <- fitted(phat3)
+
+elasticity_supply_3 <- lmer(supply_Value_log ~ phat3 + Value_lag + oil_Value + yield_Value + Yield_lag + import_Value  + Import_USA + Import_Canada + Import_Argentina +  Import_France + Import_Australia + export_Value + stock_var_Value  + Year + import_Value*yield_Value + export_Value*yield_Value + stock_var_Value*yield_Value + oil_Value*import_Value + oil_Value*export_Value + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+elasticity_demand_3 <- lmer(supply_Value_log ~ phat3 + Value_lag + oil_Value + perc_urban + population + gdp_Value + Year + (1 + Year | Area) + (1 | Region), data = df_sup, control=lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+anova(phat1, phat2, phat3)
+anova(elasticity_supply_1, elasticity_supply_2, elasticity_supply_3)
+anova(elasticity_demand_1, elasticity_demand_2, elasticity_demand_3)
+
+```
+
+
+# Making tables
+
+```{r}
+
+
+### Stargazer new
+#class(elasticity_full) <- "lmerMod"
+class(elasticity_supply_1) <- "lmerMod"
+class(elasticity_supply_2) <- "lmerMod"
+class(elasticity_supply_3) <- "lmerMod"
+class(elasticity_demand_1) <- "lmerMod"
+class(elasticity_demand_2) <- "lmerMod"
+class(elasticity_demand_3) <- "lmerMod"
+
+#Results three supply models
+stargazer(elasticity_supply_1,elasticity_supply_2, elasticity_supply_3, title="Regression results of the supply models, including the five countries exporting most (1), the top exporter from each region included in the model (2), and five countries that are the most commonly a top trade partner (3)", out="tables/results_sup.tex", no.space = TRUE, font.size="scriptsize", label="table:table_supply", single.row = TRUE,
+          notes = "Proportion respresented by \"p.\"",
+          table.placement = "H",
+          dep.var.labels  = "Supply",
+          covariate.labels=c("$\\hat{P}_{1}$","$\\hat{P}_{2}$","$\\hat{P}_{3}$", "Price t-1", "Oil price", "Yield", "Yield t-1","Import p.","Import Mexico p.","Import China p.","Import USA p.","Import Canada p.","Import Germany p.","Import Argentina p.","Import Spain p.","Import South Africa p.","Import France p.","Import Australia p.","Import Algeria p.","Import Kazakhstan p.","Import Russia p.","Import UK p.","Import India p.","Export p.","Stock variance p.","Year", "Yield x Import p.","Yield x Export p.", "Yield x Stock variance p.", "Oil price x Import p.", "Oil price x Export p.")
+          )
+
+
+
+#Results demand
+stargazer(elasticity_demand_1, elasticity_demand_2, elasticity_demand_3, title="Regression results of the best demand models, with (1), the demand model (2) and a model with the variables from the supply and demand models combined (3)", out="tables/results_dem.tex", no.space = TRUE, font.size="scriptsize", label="table:table_demand", single.row = TRUE,
+          dep.var.labels  = "Demand",
+          table.placement = "H",
+          covariate.labels=c("$\\hat{P}_{1}$","$\\hat{P}_{2}$","$\\hat{P}_{3}$", "Price t-1", "Oil price","$\\%$ Urban", "Population", "GDP per capita")
+          )
+
+#Price models
+
+class(phat1) <- "lmerMod"
+class(phat2) <- "lmerMod"
+class(phat3) <- "lmerMod"
+
+stargazer(phat1, phat2, phat3, title="Results of the 3 $\\hat{P}$ models", out="tables/results_price.tex", no.space = TRUE, font.size="tiny", label="table:table_phat", single.row = TRUE,
+          dep.var.labels  = "$\\hat{P}$",
+          table.placement = "H"
+          )
+
+
+```
+
+
+#Assumption testing 
+```{r}
+
+#elasticity_supply_3, elasticity_demand, elasticity_full
+
+#1: Linearity
+
+plot(resid(elasticity_supply_3),df_sup$Value_inf_adj)
+plot(resid(elasticity_demand_1),df_sup$Value_inf_adj)
+
+
+
+#2: Homogeneity of Variance
+
+ggplot(df_sup[df_sup$Area != "Nigeria",], aes(x=log(Value_inf_adj))) + 
+  geom_histogram()
+
+
+# Slight violation hetroskedacticity
+
+
+
+# 3: Normal distribution risiduals
+require("lattice")
+shapiro.test(df_nor$Value_inf_adj)
+# Significant shapiro-wilk test
+qqmath(elasticity_supply_3)
+# Conclusion: heavy tails but normality assumption not violated, also due to the size 
+
+
+#lattice plotting
+lattice::xyplot(fitted(elasticity_supply_1)~Value_inf_adj  | Area, groups=Area, data=df_sup, type=c('p','r'), auto.key=F)
+
+
+```
+
+
+```{r}
+  
+#descriptive statistics 
+
+descriptives <- st(df_sup[,c("phat1","phat2","phat3", "supply_Value_log", "Value_lag", "oil_Value", "yield_Value", "Yield_lag","import_Value","Import_Mexico","Import_China, mainland","Import_USA","Import_Canada","Import_Germany","Import_Argentina","Import_Spain","Import_South Africa","Import_France","Import_Australia","Import_Algeria","Import_Kazakhstan","Import_Russia","Import_UK","Import_India","export_Value","stock_var_Value","Year","perc_urban","population","gdp_Value")], out="return") 
+
+descriptives$Variable <- c("$\\hat{P}_{1}$","$\\hat{P}_{2}$","$\\hat{P}_{3}$","Supply/Demand", "Price t-1", "Oil price", "Yield","Yield t-1","Import p.","Import Mexico p.","Import China p.","Import USA p.","Import Canada p.","Import Germany p.","Import Argentina p.","Import Spain p.","Import South Africa p.","Import France p.","Import Australia p.","Import Algeria p.","Import Kazakhstan p.","Import Russia p.","Import UK p.","Import India p.","Export p.","Stock variance p.","Year"," $\\%$ Urban population","Population","GDP per capita")
+
+descriptives$N <- c("Log-transformed fitted value of local price from $\\hat{P}$ model 1","Log-transformed fitted value of local price from $\\hat{P}$ model 2","Log-transformed fitted value of local price from $\\hat{P}$ model 3","Log-transformed local value of supply and demand", "One-year lagged, log transformed local price", "Log-transformed global price of crude oil devided by the global consumer pride index", "Log-transformed local value of yield", "One year lagged, log-transformed local value of yield ","Import as a proportion of total supply","Imports from Mexico as a proportion of total imports","Imports from China as a proportion of total imports","Imports from  the United States as a proportion of total imports","Imports from Canada as a proportion of total imports","Imports from Germany as a proportion of total imports","Imports from Argentina as a proportion of total imports","Imports from Spain as a proportion of total imports","Imports from South Africa as a proportion of total imports","Imports from France as a proportion of total imports","Imports from Australia as a proportion of total imports","Imports from Algeria as a proportion of total imports","Imports from Kazachstan as a proportion of total imports","Imports from Russia as a proportion of total imports","Imports from the United Kingdom as a proportion of total imports","Imports from India as a proportion of total imports","Export as a proportion of total supply","Stock variance as a proportion of total supply","Year, with 2000 as 0","Percentage of population living in urban areas","Log-transformed local population","Log-transformed gross domestic product per capita ")
+
+names(descriptives)[2] <- "Description"
+
+write_csv(descriptives, "tables/descriptives.csv")
+```
+
+
+#Prediction and maps
+
+```{r}
+#Prediction dataset
+predictions <- df_sup
+
+predictions$phat2 <- exp(predict(phat2))
+predictions$elasticity_supply_3 <- exp(fitted.values(elasticity_supply_3))
+predictions$elasticity_demand <- exp(predict(elasticity_demand_1))
+predictions <- predictions[,c("Area","Year", "Supply2", "phat2", "elasticity_supply_3", "elasticity_demand")]
+
+#Relative mean squared error due to the differences in supply
+#predictions$elasticity_full_SE <- (predictions$supply_Value - predictions$elasticity_full)^2
+predictions$elasticity_supply_3_SE <- (predictions$Supply2 - predictions$elasticity_supply_3)^2
+predictions$elasticity_demand_SE <- (predictions$Supply2 - predictions$elasticity_demand)^2
+
+# mean supply per country
+supply_means <- as.data.frame(aggregate(predictions$Supply2,by=list(predictions$Area),FUN=mean, na.rm=TRUE))
+names(supply_means) <- c("Area","Mean")
+predictions <- merge(predictions, supply_means, by="Area", all.x=TRUE)
+
+# denominator for RSE
+predictions$mean_dif <- (predictions$Supply2 - predictions$Mean)^2
+
+#Final calculation of RSE
+RSE_vars <- as.data.frame(aggregate(predictions[,c("elasticity_supply_3_SE", "elasticity_demand_SE", "mean_dif")],by=list(predictions$Area),FUN=mean, na.rm=TRUE))
+#RSE_vars$elasticity_full <- RSE_vars$elasticity_full_SE/RSE_vars$mean_dif
+RSE_vars$elasticity_supply_3 <- RSE_vars$elasticity_supply_3_SE/RSE_vars$mean_dif
+RSE_vars$elasticity_demand <- RSE_vars$elasticity_demand_SE/RSE_vars$mean_dif
+
+RSE_vars <- RSE_vars[,c("Group.1", "elasticity_supply_3", "elasticity_demand")]
+names(RSE_vars) <- c("Area", "elasticity_supply_3", "elasticity_demand")
+#Adding iso3
+RSE_vars <- merge(RSE_vars, countrygroups[,c("Country","ISO3.Code")], by.x="Area", by.y="Country", all.x=TRUE)
+
+```
+
+
+# Creation of maps
+```{r}
+library(systemfonts)
+system_fonts()
+#adding geometry
+worldmap <- read_sf("data/world_map/world-administrative-boundaries.shp")
+
+#europemap <- read_sf("data/europe_map/NUTS_RG_20M_2021_3035.shp")
+europemap <- read_sf("data/europe_map/Europe.shp")
+#Removing part between brackets for name matching
+europemap$NAME <- str_replace(europemap$NAME, " \\s*\\([^\\)]+\\)", "")
+
+#Only countries
+#europemap <- europemap[europemap$LEVL_CODE == 0,]
+#Merging with a dataset with similar country codes and ISO3, as ISO3 is used in my original dataset
+europemap_global <- read_sf("data/europe_map/CNTR_RG_60M_2020_3857.shp")
+europemap_global <- as.data.frame(europemap_global)
+europemap <- merge(x=europemap, y=europemap_global[,c("NAME_ENGL", "ISO3_CODE")], by.x="NAME", by.y="NAME_ENGL", all.x=TRUE)
+
+europemap$ISO3_CODE[europemap$NAME=="Macedonia"] <- "MKD"
+europemap$ISO3_CODE[europemap$NAME=="Bosnia Herzegovina"] <- "BIH"
+europemap$ISO3_CODE[europemap$NAME=="Czech Republic"] <- "CZE"
+europemap$ISO3_CODE[europemap$NAME=="Russia"] <- "RUS"
+
+df_nor_geom <- df_sup
+
+#adding it to the original world map
+worldmap2 <- merge(x=worldmap, y=RSE_vars, by.x = "iso3", by.y="ISO3.Code", all.x=TRUE)
+europemap2 <- merge(x=europemap, y=RSE_vars, by.x = "ISO3_CODE", by.y="ISO3.Code", all.x=TRUE)
+
+#Reference system transformation
+
+st_crs(europemap2) <- "WGS84"
+europemap3 <- st_transform(europemap2, 3035)
+
+
+# map_elasticity_full <- tm_shape(worldmap2) +
+#   tm_layout(legend.position = c("left","bottom"), legend.text.size = 1.3, fontfamily = "serif") +
+#   tm_fill("elasticity_full", title="Total model RSE per country ", textNA="No data", breaks = c(0, 0.5, 1, 1.5, 2, Inf))
+
+map_elasticity_supply_3 <- tm_shape(worldmap2) +
+  tm_layout(legend.position = c("left","bottom"), legend.text.size = 1.3) +
+  tm_fill("elasticity_supply_3", title="Supply model RSE per country ", textNA="No data", breaks = c(0, 0.3, 0.6, 0.9, 1.2, 1.5, Inf))
+
+map_elasticity_demand <- tm_shape(worldmap2) +
+  tm_layout(legend.position = c("left","bottom"), legend.text.size = 1.3) +
+  tm_fill("elasticity_demand", title="Demand model RSE per country ", textNA="No data", breaks = c(0, 0.3, 0.6, 0.9, 1.2, 1.5, Inf))
+
+
+
+
+tmap_save(map_elasticity_supply_3, "maps/map_elasticity_supply_3.jpg")
+tmap_save(map_elasticity_demand, "maps/map_elasticity_demand.jpg")
+
+
+
+#In case df needs to be converted to sf
+#df_nor_geom <- merge(df_nor_geom, worldmap[,c("iso3","geometry")], by.x="ISO3.Code", by.y="iso3")
+#df_nor_geom <- st_as_sf(df_nor_geom)
+
+
+```
+
+```{r}
+# Prediction vs actual plot
+
+predictions2 <- predictions
+predictions2[,c("Supply2","elasticity_supply_3", "elasticity_demand")] <- log(predictions[,c("Supply2","elasticity_supply_3", "elasticity_demand")])
+means_com <- aggregate(predictions2[,c("Supply2","elasticity_supply_3", "elasticity_demand")],by=list(predictions2$Year),FUN=mean, na.rm=TRUE)
+means_com <- as.data.frame(means_com)
+means_com$Group.1 <- means_com$Group.1 + 2000
+
+names(means_com) <- c("Year","Actual Value", "Supply model", "Demand model")
+
+ggplot(means_com, aes(Year)) + 
+  geom_line(aes(y = `Actual Value`, colour = "Actual Value")) + 
+  geom_line(aes(y = `Supply model`, colour = "Supply model")) +
+  geom_line(aes(y = `Demand model`, colour = "Demand model")) +
+  labs(linetype="Country", y="Logged average value of supply", x="Year", colour="") +
+  scale_x_continuous(breaks = seq(min(means_com$Year), 2018, by = 2)) +
+  theme_classic() +
+  theme(text = element_text(size=15, family = "Times New Roman")) 
+ggsave("plots/log_pred.png", width = 20, height = 10, units="cm")
+
+
+```
+# Other tables plots
+```{r}
+# Intercepts
+library(kableExtra)
+
+f1 <- as.data.frame(ranef(elasticity_supply_1)$Region)
+names(f1) <- "Supply"
+f1$Region <- rownames(f1)
+f1 <- f1[, c(2,1)]
+
+f2 <- as.data.frame(ranef(elasticity_demand_1)$Region)
+names(f2) <- "Demand"
+f2$Region <- rownames(f2)
+f2 <- f2[, c(2,1)]
+
+f <- merge(f1, f2, by="Region")
+
+
+s1 <- as.data.frame(ranef(elasticity_supply_2)$Region)
+names(s1) <- "Supply"
+s1$Region <- rownames(s1)
+s1 <- s1[, c(2,1)]
+
+s2 <- as.data.frame(ranef(elasticity_demand_2)$Region)
+names(s2) <- "Demand"
+s2$Region <- rownames(s2)
+s2 <- s2[, c(2,1)]
+
+s <- merge(s1, s2, by="Region")
+
+
+
+d1 <- as.data.frame(ranef(elasticity_supply_3)$Region)
+names(d1) <- "Supply"
+d1$Region <- rownames(d1)
+d1 <- d1[, c(2,1)]
+
+d2 <- as.data.frame(ranef(elasticity_demand_3)$Region)
+names(d2) <- "Demand"
+d2$Region <- rownames(d2)
+d2 <- d2[, c(2,1)]
+
+d <- merge(d1, d2, by="Region")
+
+intercepts <- NULL
+intercepts <- merge (f,s, by="Region")
+intercepts <- merge (intercepts,d, by="Region")
+names(intercepts) <- c("Country","Supply","Demand","Supply","Demand","Supply","Demand")
+
+is.num <- sapply(intercepts, is.numeric)
+intercepts[is.num] <- lapply(intercepts[is.num], round, 3)
+
+write.csv(intercepts, "data/intercepts.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+#Used countries tables
+c_1 <- as.data.frame(countries_globaltop5)
+c_1[6:13,] <- "" 
+names(c_1) <- "Countries model 1"
+
+c2_c <- c("Mexico","China","United States of America","Argentina","Spain","South Africa","Australia","Algeria","Kazakhstan","Russia","United Kingdom","India","France")
+
+
+#c_3 <- as.data.frame(countries_top_traders)
+c_3 <- countries_top_traders
+c_3[6:13] <- "" 
+
+
+combined <- c_1
+combined$one <- c("Mexico","China","United States of America","Argentina","Spain","South Africa","Australia","Algeria","Kazakhstan","Russia","United Kingdom","India","France")
+combined$two <- c_3
+
+names(combined) <- c("Model 1","Model 2","Model 3")
+
+write.csv(combined, "tables/countries_used.csv")
+
+```
+
+
+```{r}
+library(extrafont)
+# Errors per country and intercept slope year
+ggplot(data=df_sup[df_sup$Area == c("Portugal","Belarus"),], aes(x=Year + 2000, y=supply_Value, linetype=Area)) +
+  geom_line()+
+  geom_point() +
+  labs(linetype="Country", y="Supply in tonnes", x="Year") +
+  theme_classic() +
+  theme(text = element_text(size=15, family = "Times New Roman"))
+ggsave("plots/supply_dev.png", width = 20, height = 10, units="cm")
+
+#write.csv(df_sup, "Data/df_sup.csv")
+
+```
+
+# Appendix files
+
+```{r}
+
+# Countries used CSV file
+countriesused <- as.data.frame(unique(df_sup$Area))
+names(countriesused) <- "Area"
+countriesused <- merge(countriesused, countrygroups[,c(2,4)], by.x = "Area", by.y="Country", all.x=TRUE)
+names(countriesused) <- c("Country", "Region")
+countriesused[70,1] <- "United Kingdom"
+write.csv(countriesused,"Appendix/countriesused.csv", row.names = FALSE)
+
+#RSE
+errors_table <- RSE_vars[,1:3]
+names(errors_table) <- c("Country",  "Supply Model RSE", "Demand model RSE")
+
+write.csv(errors_table,"Appendix/country_errors.csv", row.names = FALSE)
+
+#Year incercept/slope
+
+
+s <- as.data.frame(ranef(elasticity_supply_3)$Area)
+names(s) <- c("Intercept year supply (3)", "Slope year supply")
+s$Area <- rownames(s)
+s <- s[, c(3,1,2)]
+d <- as.data.frame(ranef(elasticity_demand_1)$Area)
+names(d) <- c("Intercept year demand (1)", "Slope year demand")
+d$Area <- rownames(d)
+d <- d[, c(3,1,2)]
+
+int_slop <- merge(s, d, by="Area")
+
+is.num <- sapply(int_slop, is.numeric)
+int_slop[is.num] <- lapply(int_slop[is.num], round, 4)
+
+names(int_slop)[1] <- "Country"
+
+write.csv(int_slop,"Appendix/int_slop.csv", row.names = FALSE)
+
+
+```

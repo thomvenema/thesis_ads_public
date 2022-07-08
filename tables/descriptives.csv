@@ -1,0 +1,31 @@
+Variable,Description,Mean,Std. Dev.,Min,Pctl. 25,Pctl. 75,Max
+$\hat{P}_{1}$,Log-transformed fitted value of local price from $\hat{P}$ model 1,5.616,0.47,4.601,5.285,5.887,7.481
+$\hat{P}_{2}$,Log-transformed fitted value of local price from $\hat{P}$ model 2,5.616,0.471,4.606,5.286,5.884,7.465
+$\hat{P}_{3}$,Log-transformed fitted value of local price from $\hat{P}$ model 3,5.616,0.47,4.603,5.287,5.889,7.481
+Supply/Demand,Log-transformed local value of supply and demand,8.168,1.605,3.091,6.966,9.271,11.957
+Price t-1,"One-year lagged, log transformed local price",5.628,0.52,4.52,5.218,5.921,8.075
+Oil price,Log-transformed global price of crude oil devided by the global consumer pride index,4.091,0.486,3.196,3.778,4.577,4.716
+Yield,Log-transformed local value of yield,10.346,0.597,8.471,9.952,10.776,11.53
+Yield t-1,"One year lagged, log-transformed local value of yield ",10.337,0.604,8.471,9.942,10.772,11.53
+Import p.,Import as a proportion of total supply,0.34,0.308,0,0.051,0.558,1.574
+Import Mexico p.,Imports from Mexico as a proportion of total imports,0.001,0.009,0,0,0,0.132
+Import China p.,Imports from China as a proportion of total imports,0,0.003,0,0,0,0.089
+Import USA p.,Imports from  the United States as a proportion of total imports,0.066,0.161,0,0,0.035,1.571
+Import Canada p.,Imports from Canada as a proportion of total imports,0.061,0.131,0,0,0.048,0.717
+Import Germany p.,Imports from Germany as a proportion of total imports,0.038,0.075,0,0,0.041,0.584
+Import Argentina p.,Imports from Argentina as a proportion of total imports,0.034,0.119,0,0,0,0.942
+Import Spain p.,Imports from Spain as a proportion of total imports,0.004,0.017,0,0,0,0.198
+Import South Africa p.,Imports from South Africa as a proportion of total imports,0.002,0.018,0,0,0,0.302
+Import France p.,Imports from France as a proportion of total imports,0.051,0.119,0,0,0.016,0.756
+Import Australia p.,Imports from Australia as a proportion of total imports,0.025,0.112,0,0,0,0.848
+Import Algeria p.,Imports from Algeria as a proportion of total imports,0,0.001,0,0,0,0.051
+Import Kazakhstan p.,Imports from Kazachstan as a proportion of total imports,0.026,0.11,0,0,0,0.896
+Import Russia p.,Imports from Russia as a proportion of total imports,0.08,1.236,0,0,0.014,42.785
+Import UK p.,Imports from the United Kingdom as a proportion of total imports,0.011,0.046,0,0,0,0.731
+Import India p.,Imports from India as a proportion of total imports,0.007,0.071,0,0,0,0.986
+Export p.,Export as a proportion of total supply,-0.147,0.14,-0.756,-0.259,-0.018,0
+Stock variance p.,Stock variance as a proportion of total supply,-0.011,0.108,-1.007,-0.045,0.036,0.464
+Year,"Year, with 2000 as 0",8.432,5.182,0,4,13,17
+ $\%$ Urban population,Percentage of population living in urban areas,0.643,0.2,0.139,0.55,0.791,0.98
+Population,Log-transformed local population,9.693,1.498,5.634,8.594,10.745,14.163
+GDP per capita,Log-transformed gross domestic product per capita ,2.087,1.516,-2.216,1.097,3.462,4.816
